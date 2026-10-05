@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"game-event-service/internal/model"
+	"game-event-service/internal/worker"
 )
 
 type mockEventRepository struct {
@@ -15,13 +16,13 @@ type mockEventRepository struct {
 func (m *mockEventRepository) Create(ctx context.Context, event model.Event) error {
 	m.called = true
 	m.event = event
-
 	return nil
 }
 
 func TestCreateEvent(t *testing.T) {
 	repository := &mockEventRepository{}
-	service := NewEventService(repository)
+	eventWorker := worker.NewEventWorker(1, 1)
+	service := NewEventService(repository, eventWorker)
 
 	event := model.Event{
 		PlayerID: 1,

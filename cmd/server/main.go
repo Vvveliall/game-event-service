@@ -15,12 +15,14 @@ import (
 	"game-event-service/internal/handler"
 	"game-event-service/internal/repository"
 	"game-event-service/internal/service"
+	"game-event-service/internal/worker"
 )
 
 func main() {
 	cfg := config.Load()
 
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	db, err := database.NewPool(ctx, cfg.DatabaseURL)
 	if err != nil {
@@ -39,7 +41,11 @@ func main() {
 	eventRepository := repository.NewEventRepository(db)
 	playerRepository := repository.NewPlayerRepository(db)
 
-	eventService := service.NewEventService(eventRepository)
+	eventWorker := worker.NewEventWorker(100, 3)
+
+	go eventWorker.Run(ctx)
+
+	eventService := service.NewEventService(eventRepository, eventWorker)
 	playerService := service.NewPlayerService(playerRepository, playerCache)
 
 	h := handler.New(eventService, playerService)
@@ -69,8 +75,10 @@ func main() {
 		log.Printf("shutdown signal received: %s", sig)
 	}
 
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+	cancel()
+
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer shutdownCancel()
 
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		log.Printf("graceful shutdown error: %v", err)
