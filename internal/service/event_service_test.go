@@ -11,12 +11,13 @@ import (
 type mockEventRepository struct {
 	called bool
 	event  model.Event
+	err    error
 }
 
 func (m *mockEventRepository) Create(ctx context.Context, event model.Event) error {
 	m.called = true
 	m.event = event
-	return nil
+	return m.err
 }
 
 type mockEventPublisher struct {
@@ -69,6 +70,37 @@ func TestCreateEvent(t *testing.T) {
 
 	if publisher.event != event {
 		t.Fatalf("unexpected published event: got %+v, want %+v", publisher.event, event)
+	}
+}
+
+func TestCreateEventRepositoryError(t *testing.T) {
+	repositoryError := errors.New("database error")
+
+	repository := &mockEventRepository{
+		err: repositoryError,
+	}
+
+	publisher := &mockEventPublisher{}
+
+	service := NewEventService(repository, publisher)
+
+	event := model.Event{
+		PlayerID: 1,
+		Type:     "purchase.created",
+		Payload:  "repository_error_test",
+	}
+
+	err := service.CreateEvent(context.Background(), event)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	if !errors.Is(err, repositoryError) {
+		t.Fatalf("unexpected error: got %v, want %v", err, repositoryError)
+	}
+
+	if publisher.called {
+		t.Fatal("publisher should not be called when repository fails")
 	}
 }
 
