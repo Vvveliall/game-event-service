@@ -5,19 +5,26 @@ import (
 	"log"
 	"sync"
 
+	"game-event-service/internal/metrics"
 	"game-event-service/internal/model"
 )
 
 type EventWorker struct {
 	events      chan model.Event
 	workerCount int
+	metrics     *metrics.Metrics
 	wg          sync.WaitGroup
 }
 
-func NewEventWorker(bufferSize, workerCount int) *EventWorker {
+func NewEventWorker(
+	bufferSize int,
+	workerCount int,
+	metrics *metrics.Metrics,
+) *EventWorker {
 	return &EventWorker{
 		events:      make(chan model.Event, bufferSize),
 		workerCount: workerCount,
+		metrics:     metrics,
 	}
 }
 
@@ -39,6 +46,8 @@ func (w *EventWorker) Run(ctx context.Context) {
 						event.Type,
 						event.PlayerID,
 					)
+
+					w.metrics.RecordEventProcessed()
 
 				case <-ctx.Done():
 					log.Printf("worker %d stopped", id)

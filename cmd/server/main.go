@@ -13,6 +13,9 @@ import (
 	"game-event-service/internal/config"
 	"game-event-service/internal/database"
 	"game-event-service/internal/handler"
+	"game-event-service/internal/logger"
+	"game-event-service/internal/metrics"
+	"game-event-service/internal/middleware"
 	"game-event-service/internal/queue"
 	"game-event-service/internal/repository"
 	"game-event-service/internal/service"
@@ -21,6 +24,8 @@ import (
 
 func main() {
 	cfg := config.Load()
+	appLogger := logger.New(cfg.Env)
+	appMetrics := metrics.New()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -48,14 +53,14 @@ func main() {
 	eventRepository := repository.NewEventRepository(db)
 	playerRepository := repository.NewPlayerRepository(db)
 
-	eventWorker := worker.NewEventWorker(100, 3)
+	eventWorker := worker.NewEventWorker(100, 3, appMetrics)
 	eventConsumer := queue.NewEventConsumer(rabbitMQ, eventWorker)
 
 	go eventWorker.Run(ctx)
 
 	go func() {
 		if err := eventConsumer.Run(ctx); err != nil {
-			log.Printf("event consumer error: %v", err)
+			appLogger.Error("event consumer error", "error", err)
 			cancel()
 		}
 	}()
@@ -65,17 +70,29 @@ func main() {
 
 	h := handler.New(eventService, playerService)
 
+	routes := h.Routes()
+	routes = middleware.Metrics(appMetrics)(routes)
+	routes = middleware.Logging(appLogger)(routes)
+	routes = middleware.RequestID(routes)
+
+	mux := http.NewServeMux()
+	mux.Handle("/", routes)
+	mux.Handle("/metrics", appMetrics.Handler())
+
 	server := &http.Server{
 		Addr:              ":" + cfg.Port,
-		Handler:           h.Routes(),
+		Handler:           mux,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
 	serverErrors := make(chan error, 1)
 
 	go func() {
-		log.Printf("server started on :%s", cfg.Port)
-		serverErrors <- server.ListenAndServe()
+		appLogger.Info("server started", "port", cfg.Port)
+
+		if err := server.ListenAndServe(); err != nil {
+			serverErrors <- err
+		}
 	}()
 
 	shutdownSignal := make(chan os.Signal, 1)
@@ -84,10 +101,10 @@ func main() {
 	select {
 	case err := <-serverErrors:
 		if err != nil && err != http.ErrServerClosed {
-			log.Fatalf("server error: %v", err)
+			appLogger.Error("server error", "error", err)
 		}
 	case sig := <-shutdownSignal:
-		log.Printf("shutdown signal received: %s", sig)
+		appLogger.Info("shutdown signal received", "signal", sig.String())
 	}
 
 	cancel()
@@ -96,8 +113,8 @@ func main() {
 	defer shutdownCancel()
 
 	if err := server.Shutdown(shutdownCtx); err != nil {
-		log.Printf("graceful shutdown error: %v", err)
+		appLogger.Error("graceful shutdown error", "error", err)
 	}
 
-	log.Println("server stopped")
+	appLogger.Info("server stopped")
 }
