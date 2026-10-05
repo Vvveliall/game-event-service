@@ -11,6 +11,7 @@ type Config struct {
 	Env         string
 	DatabaseURL string
 	RedisAddr   string
+	RabbitMQURL string
 }
 
 func Load() Config {
@@ -36,5 +37,6 @@ func Load() Config {
 		Env:         env,
 		DatabaseURL: os.Getenv("DATABASE_URL"),
 		RedisAddr:   redisAddr,
+		RabbitMQURL: os.Getenv("RABBITMQ_URL"),
 	}
 }

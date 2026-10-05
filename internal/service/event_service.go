@@ -4,22 +4,22 @@ import (
 	"context"
 
 	"game-event-service/internal/model"
+	"game-event-service/internal/queue"
 	"game-event-service/internal/repository"
-	"game-event-service/internal/worker"
 )
 
 type EventService struct {
 	eventRepository repository.EventRepositoryInterface
-	eventWorker     *worker.EventWorker
+	eventPublisher  queue.EventPublisher
 }
 
 func NewEventService(
 	eventRepository repository.EventRepositoryInterface,
-	eventWorker *worker.EventWorker,
+	eventPublisher queue.EventPublisher,
 ) *EventService {
 	return &EventService{
 		eventRepository: eventRepository,
-		eventWorker:     eventWorker,
+		eventPublisher:  eventPublisher,
 	}
 }
 
@@ -28,7 +28,9 @@ func (s *EventService) CreateEvent(ctx context.Context, event model.Event) error
 		return err
 	}
 
-	s.eventWorker.Submit(event)
+	if err := s.eventPublisher.PublishEvent(ctx, event); err != nil {
+		return err
+	}
 
 	return nil
 }

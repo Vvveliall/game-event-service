@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"game-event-service/internal/model"
-	"game-event-service/internal/worker"
 )
 
 type mockEventRepository struct {
@@ -19,10 +18,22 @@ func (m *mockEventRepository) Create(ctx context.Context, event model.Event) err
 	return nil
 }
 
+type mockEventPublisher struct {
+	called bool
+	event  model.Event
+}
+
+func (m *mockEventPublisher) PublishEvent(ctx context.Context, event model.Event) error {
+	m.called = true
+	m.event = event
+	return nil
+}
+
 func TestCreateEvent(t *testing.T) {
 	repository := &mockEventRepository{}
-	eventWorker := worker.NewEventWorker(1, 1)
-	service := NewEventService(repository, eventWorker)
+	publisher := &mockEventPublisher{}
+
+	service := NewEventService(repository, publisher)
 
 	event := model.Event{
 		PlayerID: 1,
@@ -41,5 +52,13 @@ func TestCreateEvent(t *testing.T) {
 
 	if repository.event != event {
 		t.Fatalf("unexpected event: got %+v, want %+v", repository.event, event)
+	}
+
+	if !publisher.called {
+		t.Fatal("event publisher was not called")
+	}
+
+	if publisher.event != event {
+		t.Fatalf("unexpected published event: got %+v, want %+v", publisher.event, event)
 	}
 }
