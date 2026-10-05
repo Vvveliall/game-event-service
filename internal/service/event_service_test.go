@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"game-event-service/internal/model"
@@ -19,13 +20,21 @@ func (m *mockEventRepository) Create(ctx context.Context, event model.Event) err
 }
 
 type mockEventPublisher struct {
-	called bool
-	event  model.Event
+	called      bool
+	event       model.Event
+	failures    int
+	publishings int
 }
 
 func (m *mockEventPublisher) PublishEvent(ctx context.Context, event model.Event) error {
 	m.called = true
 	m.event = event
+	m.publishings++
+
+	if m.publishings <= m.failures {
+		return errors.New("temporary rabbitmq error")
+	}
+
 	return nil
 }
 
@@ -60,5 +69,53 @@ func TestCreateEvent(t *testing.T) {
 
 	if publisher.event != event {
 		t.Fatalf("unexpected published event: got %+v, want %+v", publisher.event, event)
+	}
+}
+
+func TestCreateEventRetriesPublishing(t *testing.T) {
+	repository := &mockEventRepository{}
+	publisher := &mockEventPublisher{
+		failures: 2,
+	}
+
+	service := NewEventService(repository, publisher)
+
+	event := model.Event{
+		PlayerID: 1,
+		Type:     "purchase.created",
+		Payload:  "retry_test",
+	}
+
+	err := service.CreateEvent(context.Background(), event)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if publisher.publishings != 3 {
+		t.Fatalf("unexpected publish attempts: got %d, want 3", publisher.publishings)
+	}
+}
+
+func TestCreateEventFailsAfterRetries(t *testing.T) {
+	repository := &mockEventRepository{}
+	publisher := &mockEventPublisher{
+		failures: 10,
+	}
+
+	service := NewEventService(repository, publisher)
+
+	event := model.Event{
+		PlayerID: 1,
+		Type:     "purchase.created",
+		Payload:  "retry_fail_test",
+	}
+
+	err := service.CreateEvent(context.Background(), event)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	if publisher.publishings != 3 {
+		t.Fatalf("unexpected publish attempts: got %d, want 3", publisher.publishings)
 	}
 }

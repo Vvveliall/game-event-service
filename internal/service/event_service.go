@@ -2,10 +2,18 @@ package service
 
 import (
 	"context"
+	"time"
 
 	"game-event-service/internal/model"
 	"game-event-service/internal/queue"
 	"game-event-service/internal/repository"
+	"game-event-service/internal/retry"
+)
+
+const (
+	publishAttempts = 3
+	publishDelay    = 200 * time.Millisecond
+	publishTimeout  = 2 * time.Second
 )
 
 type EventService struct {
@@ -28,7 +36,17 @@ func (s *EventService) CreateEvent(ctx context.Context, event model.Event) error
 		return err
 	}
 
-	if err := s.eventPublisher.PublishEvent(ctx, event); err != nil {
+	publishCtx, cancel := context.WithTimeout(ctx, publishTimeout)
+	defer cancel()
+
+	if err := retry.Do(
+		publishCtx,
+		publishAttempts,
+		publishDelay,
+		func(ctx context.Context) error {
+			return s.eventPublisher.PublishEvent(ctx, event)
+		},
+	); err != nil {
 		return err
 	}
 
